@@ -153,10 +153,12 @@ bool HybridAStar::ValidityCheck(std::shared_ptr<Node3d> node) {
   }
 
   for (size_t i = check_start_index; i < node_step_size; ++i) {
+    // 判断是否在 x_y bound内
     if (traversed_x[i] > XYbounds_[1] || traversed_x[i] < XYbounds_[0] ||
         traversed_y[i] > XYbounds_[3] || traversed_y[i] < XYbounds_[2]) {
       return false;
     }
+    // 获取车辆矩形，判断是否与障碍物线段发生碰撞
     Box2d bounding_box = Node3d::GetBoundingBox(
         vehicle_param_, traversed_x[i], traversed_y[i], traversed_phi[i]);
     for (const auto& obstacle_linesegments : obstacles_linesegments_vec_) {
@@ -717,6 +719,11 @@ bool HybridAStar::Plan(
   open_pq_ = decltype(open_pq_)();
   final_node_ = nullptr;
   PrintCurves print_curves;
+  /*
+  障碍物点集=>障碍物线段集
+  点集为二维数组，第一维为单个障碍物，第二维为单个障碍物的顶点
+  线段集同上
+   */
   std::vector<std::vector<common::math::LineSegment2d>>
       obstacles_linesegments_vec;
   for (const auto& obstacle_vertices : obstacles_vertices_vec) {
@@ -730,7 +737,10 @@ bool HybridAStar::Plan(
     }
     obstacles_linesegments_vec.emplace_back(obstacle_linesegments);
   }
+  // 通过 std::move 移动资源
   obstacles_linesegments_vec_ = std::move(obstacles_linesegments_vec);
+
+  // 绘图 map 添加障碍物的 index ：障碍物点坐标x,y 的 pair 的 vector映射
   for (size_t i = 0; i < obstacles_linesegments_vec_.size(); i++) {
     for (auto linesg : obstacles_linesegments_vec_[i]) {
       std::string name = std::to_string(i) + "roi_boundary";
@@ -738,14 +748,23 @@ bool HybridAStar::Plan(
       print_curves.AddPoint(name, linesg.end());
     }
   }
+
+  // 车辆位置(后轴中心定位位置)
   Vec2d sposition(sx, sy);
+  
+  // 起点到车辆几何中心向量
   Vec2d svec_to_center(
           (vehicle_param_.front_edge_to_center() -
            vehicle_param_.back_edge_to_center()) / 2.0,
           (vehicle_param_.left_edge_to_center() -
            vehicle_param_.right_edge_to_center()) / 2.0);
+
+  // 车辆几何中心位置 
   Vec2d scenter(sposition + svec_to_center.rotate(sphi));
+
+  // 创建车辆矩形
   Box2d sbox(scenter, sphi, vehicle_param_.length(), vehicle_param_.width());
+
   print_curves.AddPoint("vehicle_start_box", sbox.GetAllCorners());
   Vec2d eposition(ex, ey);
   print_curves.AddPoint("end_position", eposition);
@@ -757,6 +776,7 @@ bool HybridAStar::Plan(
   Vec2d ecenter(eposition + evec_to_center.rotate(ephi));
   Box2d ebox(ecenter, ephi, vehicle_param_.length(), vehicle_param_.width());
   print_curves.AddPoint("vehicle_end_box", ebox.GetAllCorners());
+  
   XYbounds_ = XYbounds;
 // load nodes and obstacles
   start_node_.reset(
@@ -765,6 +785,8 @@ bool HybridAStar::Plan(
       new Node3d({ex}, {ey}, {ephi}, XYbounds_, planner_open_space_config_));
   AINFO << "start node" << sx << "," << sy << "," << sphi;
   AINFO << "end node " << ex << "," << ey << "," << ephi;
+  
+  // 起点可行性检测
   if (!ValidityCheck(start_node_)) {
     AERROR << "start_node in collision with obstacles";
     AERROR << start_node_->GetX()
@@ -773,18 +795,23 @@ bool HybridAStar::Plan(
     print_curves.PrintToLog();
     return false;
   }
+  // 终点可行性检测
   if (!ValidityCheck(end_node_)) {
     AERROR << "end_node in collision with obstacles";
     print_curves.PrintToLog();
     return false;
   }
+
+  // 生成dp_map_
   double map_time = Clock::NowInSeconds();
   grid_a_star_heuristic_generator_->GenerateDpMap(
       ex, ey, XYbounds_, obstacles_linesegments_vec_);
   ADEBUG << "map time " << Clock::NowInSeconds() - map_time;
-  // load open set, pq
+  
+  // 将起点加入 open_set 和 open_pq
   open_set_.insert(start_node_->GetIndex());
   open_pq_.emplace(start_node_, start_node_->GetCost());
+
   // Hybrid A* begins
   size_t explored_node_num = 0;
   size_t available_result_num = 0;
@@ -802,12 +829,17 @@ bool HybridAStar::Plan(
       planner_open_space_config_.warm_start_config().max_explored_num());
   static constexpr int kMaxNodeNum = 200000;
   std::vector<std::shared_ptr<Node3d>> candidate_final_nodes;
+
+  // Hybrid A* 搜索
   while (!open_pq_.empty() &&
          open_pq_.size() < kMaxNodeNum &&
          available_result_num < desired_explored_num &&
          explored_node_num < max_explored_num) {
+    
+    // 从 open_pq_ 中取出 cost 最小的节点
     std::shared_ptr<Node3d> current_node = open_pq_.top().first;
     open_pq_.pop();
+
     const double rs_start_time = Clock::NowInSeconds();
     std::shared_ptr<Node3d> final_node = nullptr;
     if (AnalyticExpansion(current_node, &final_node)) {

@@ -40,15 +40,18 @@ double GridSearch::EuclidDistance(
 bool GridSearch::CheckConstraints(std::shared_ptr<Node2d> node) {
   const double node_grid_x = node->GetGridX();
   const double node_grid_y = node->GetGridY();
+  // 检查是否越界
   if (node_grid_x > max_grid_x_ ||
       node_grid_x < 0  ||
       node_grid_y > max_grid_y_ ||
       node_grid_y < 0) {
     return false;
   }
+  // 碰撞检测-无障碍物
   if (obstacles_linesegments_vec_.empty()) {
     return true;
   }
+  // 碰撞检测-有障碍物
   for (const auto& obstacle_linesegments : obstacles_linesegments_vec_) {
     for (const common::math::LineSegment2d& linesegment :
          obstacle_linesegments) {
@@ -175,6 +178,7 @@ bool GridSearch::GenerateDpMap(
             obstacles_linesegments_vec,
         const std::vector<std::vector<common::math::LineSegment2d>>&
             soft_boundary_linesegments_vec) {
+  // 依据 cost  升序排序的 Node2d 的 index
   std::priority_queue<std::pair<std::string, double>,
                       std::vector<std::pair<std::string, double>>, cmp>
       open_pq;
@@ -187,31 +191,48 @@ bool GridSearch::GenerateDpMap(
   std::shared_ptr<Node2d> end_node =
       std::make_shared<Node2d>(ex, ey, xy_grid_resolution_, XYbounds_);
   obstacles_linesegments_vec_ = obstacles_linesegments_vec;
+  // open_set 放入终点
   open_set.emplace(end_node->GetIndex(), end_node);
+  // open_pq 放入终点
   open_pq.emplace(end_node->GetIndex(), end_node->GetCost());
 
   // Grid a star begins
   size_t explored_node_num = 0;
+  // 只要 open_pq 不空
   while (!open_pq.empty()) {
+    
+    // 取出 open 优先队列中 cost 最小的 index
     const std::string current_id = open_pq.top().first;
     open_pq.pop();
     std::shared_ptr<Node2d> current_node = open_set[current_id];
+    
+    // 将当前节点加入 dp_map_
     dp_map_.emplace(current_node->GetIndex(), current_node);
+    
+    // 拓展8 个节点，从上开始，顺时针旋转
     std::vector<std::shared_ptr<Node2d>> next_nodes =
         std::move(GenerateNextNodes(current_node));
+    // 遍历子节点
     for (auto& next_node : next_nodes) {
+      // 检查是否符合约束，不符合则跳过
       if (!CheckConstraints(next_node)) {
         continue;
       }
+      // 如果已经在 dp_map_ 中，则跳过
       if (dp_map_.find(next_node->GetIndex()) != dp_map_.end()) {
         continue;
       }
+      // 如果不在 open_set 中，则加入 open_set 和 open_pq
       if (open_set.find(next_node->GetIndex()) == open_set.end()) {
         ++explored_node_num;
+        // 设置 pre_node
         next_node->SetPreNode(current_node);
         open_set.emplace(next_node->GetIndex(), next_node);
         open_pq.emplace(next_node->GetIndex(), next_node->GetCost());
-      } else {
+      } 
+      // 如果已经在 open_set 中
+      else {
+        // 如果 cost 更小，则更新 cost 和 pre_node
         if (open_set[next_node->GetIndex()]->GetCost() > next_node->GetCost()) {
           open_set[next_node->GetIndex()]->SetCost(next_node->GetCost());
           open_set[next_node->GetIndex()]->SetPreNode(current_node);

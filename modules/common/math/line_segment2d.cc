@@ -63,18 +63,23 @@ double LineSegment2d::length() const { return length_; }
 double LineSegment2d::length_sqr() const { return length_ * length_; }
 
 double LineSegment2d::DistanceTo(const Vec2d &point) const {
+  // 若线段长度很短，则计算起点到点的距离
   if (length_ <= kMathEpsilon) {
     return point.DistanceTo(start_);
   }
+  // 根据投影，看点是否在线段中
   const double x0 = point.x() - start_.x();
   const double y0 = point.y() - start_.y();
   const double proj = x0 * unit_direction_.x() + y0 * unit_direction_.y();
+  // 小于起点，结果为到起点的距离
   if (proj <= 0.0) {
     return hypot(x0, y0);
   }
+  // 大于终点，结果为到终点的距离
   if (proj >= length_) {
     return point.DistanceTo(end_);
   }
+  // 在线段中，结果为点到直线的垂线距离
   return std::abs(x0 * unit_direction_.y() - y0 * unit_direction_.x());
 }
 

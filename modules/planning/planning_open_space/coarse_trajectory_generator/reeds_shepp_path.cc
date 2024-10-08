@@ -208,12 +208,18 @@ bool ReedShepp::GenerateRSP(
         const std::shared_ptr<Node3d> start_node,
         const std::shared_ptr<Node3d> end_node,
         std::vector<ReedSheppPath>* all_possible_paths) {
+  
+  // 计算起始点和目标点之间的位姿差
   double dx = end_node->GetX() - start_node->GetX();
   double dy = end_node->GetY() - start_node->GetY();
   double dphi = end_node->GetPhi() - start_node->GetPhi();
+  
+  // 获取起点 heading 的 sin 和 cos
   double c = std::cos(start_node->GetPhi());
   double s = std::sin(start_node->GetPhi());
   // normalize the initial point to (0,0,0)
+  
+  // 计算目标点相对于起点的位姿差，并乘以 max_kappa_
   double x = (c * dx + s * dy) * max_kappa_;
   double y = (-s * dx + c * dy) * max_kappa_;
   // if (!CS(x, y, dphi, all_possible_paths)) {
