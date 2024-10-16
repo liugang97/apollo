@@ -84,7 +84,7 @@ bool ReedShepp::ShortestRSP(
                 "paths";
       return false;
   }
-
+  // 获取起点行驶方向
   double start_dire = 1;
   if (start_node->GetDirec() == false)
       start_dire = -1;
@@ -92,44 +92,60 @@ bool ReedShepp::ShortestRSP(
   size_t optimal_path_index = 0;
   size_t paths_size = all_possible_paths.size();
   double min_cost = std::numeric_limits<double>::max();
+  // 遍历所有可行的RS路径结果
   for (size_t i = 0; i < paths_size; ++i) {
     double cost = 0;
+    // 获取当前路径
     auto& path = all_possible_paths[i];
+    // 计算的转向半径及转向变化惩罚
     double steering_radius = path.radius / max_kappa_;
     double steer_change_penalty_cost =
         std::atan(vehicle_param_.wheel_base() / steering_radius * 2.0) *
         traj_steer_change_penalty_;
+    // 遍历路径段
     for (size_t j = 0; j < path.segs_lengths.size(); j++) {
+      // 若为路径段不为直线
       if (path.segs_types[j] != 'S') {
+        // 计算当前路径段的转向惩罚
         cost += std::fabs(path.segs_lengths[j]) * (traj_steer_penalty_) /
                 max_kappa_ * path.radius;
+        // 若前一路径段不为直线，且当前路径段与前一路径段转向不同，则添加转向变化惩罚
         if (j > 0 && (path.segs_types[j - 1] != 'S') &&
             (path.segs_types[j - 1] != path.segs_types[j])) {
           cost += steer_change_penalty_cost;
         }
-        if (std::fabs(path.segs_lengths[j]) / max_kappa_ * path.radius <
+        // 若当前路径段实际长度小于最小期望长度，则添加路径段长度惩罚
+        if (std::fabs(path.segs_lengths[j]) / max_kappa_ * path.radius < // 为什么这么算实际长度？
             traj_expected_shortest_length_) {
           cost += traj_short_length_penalty_;
         }
-      } else {
+      } 
+      // 若为路径段直线
+      else {
+        // 若当前路径段为后退，则添加后退距离惩罚
         if (path.segs_lengths[j] < 0) {
           cost += -path.segs_lengths[j] * traj_back_penalty_ / max_kappa_;
-        } else {
+        } 
+        // 若为路径段前进，则添加前进距离惩罚
+        else {
           cost += path.segs_lengths[j] * traj_forward_penalty_ / max_kappa_;
         }
+        // 若当前路径段实际长度小于最小期望长度，则添加路径段短长度惩罚
         if (std::fabs(path.segs_lengths[j]) / max_kappa_ <
             traj_expected_shortest_length_) {
           cost += traj_short_length_penalty_;
         }
       }
-
+      // 若当前路径段与前一路径段前进方向不同，则添加档位变化惩罚
       if (j > 0 && path.segs_lengths[j] * path.segs_lengths[j - 1] < 0) {
         cost += traj_gear_switch_penalty_;
       }
+      // 若第一段路径与起点行驶方向不同，则添加档位变化惩罚
       if (j == 0 && start_dire * path.segs_lengths[j] < 0) {
         cost += traj_gear_switch_penalty_;
       }
     }
+    // 若当前路径成本小于最小成本，则更新最小成本及最优路径索引
     if (cost < min_cost) {
       optimal_path_index = i;
       min_cost = cost;
