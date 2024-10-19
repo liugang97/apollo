@@ -79,12 +79,15 @@ bool ReedShepp::ShortestRSP(
         const std::shared_ptr<Node3d> end_node,
         std::shared_ptr<ReedSheppPath> optimal_path) {
   std::vector<ReedSheppPath> all_possible_paths;
+  
+  // 生成所有可能的reed shepp路径
   if (!GenerateRSPs(start_node, end_node, &all_possible_paths)) {
       ADEBUG << "Fail to generate different combination of Reed Shepp "
                 "paths";
       return false;
   }
-
+  
+  // 计算所有可行RS路径代价及其index
   double start_dire = 1;
   if (start_node->GetDirec() == false)
       start_dire = -1;
@@ -136,6 +139,7 @@ bool ReedShepp::ShortestRSP(
     }
   }
 
+  // 生成局部路径点
   if (!GenerateLocalConfigurations(start_node, end_node,
                                    &(all_possible_paths
                                    [optimal_path_index]))) {
@@ -150,6 +154,7 @@ bool ReedShepp::ShortestRSP(
   // ssm << "--rspath\n";
   // AERROR << ssm.str();
 
+  // 路径重点误差校验
   if (std::abs(all_possible_paths[optimal_path_index].x.back() -
                end_node->GetX()) > 1e-3 ||
       std::abs(all_possible_paths[optimal_path_index].y.back() -
@@ -171,6 +176,8 @@ bool ReedShepp::ShortestRSP(
            << end_node->GetY() << ", " << end_node->GetPhi();
     return false;
   }
+
+  // 将最优路径赋值给optimal_path
   (*optimal_path).cost = min_cost;
   (*optimal_path).x = all_possible_paths[optimal_path_index].x;
   (*optimal_path).y = all_possible_paths[optimal_path_index].y;

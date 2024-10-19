@@ -110,14 +110,20 @@ bool HybridAStar::AnalyticExpansion(
     std::shared_ptr<Node3d>* candidate_final_node) {
   std::shared_ptr<ReedSheppPath> reeds_shepp_to_check =
       std::make_shared<ReedSheppPath>();
+  
+  // 生成最小代价reed shepp路径,并计算路径离散点
   if (!reed_shepp_generator_->ShortestRSP(current_node, end_node_,
                                           reeds_shepp_to_check)) {
     return false;
   }
+  
+  // RS路径边界和碰撞校验
   if (!RSPCheck(reeds_shepp_to_check)) {
     return false;
   }
   // load the whole RSP as nodes and add to the close set
+  
+  // RS路径拓展方式得到的候选终点节点
   *candidate_final_node = LoadRSPinCS(reeds_shepp_to_check, current_node);
   return true;
 }
@@ -134,11 +140,14 @@ bool HybridAStar::ValidityCheck(std::shared_ptr<Node3d> node) {
   CHECK_NOTNULL(node);
   CHECK_GT(node->GetStepSize(), 0U);
 
+  // 若没有障碍物，则直接返回true
   if (obstacles_linesegments_vec_.empty()) {
     return true;
   }
 
+  // 获取当前节点的经过的步长
   size_t node_step_size = node->GetStepSize();
+  // 获取当前节点的经过的x,y,phi
   const auto& traversed_x = node->GetXs();
   const auto& traversed_y = node->GetYs();
   const auto& traversed_phi = node->GetPhis();
@@ -183,7 +192,9 @@ std::shared_ptr<Node3d> HybridAStar::LoadRSPinCS(
   std::shared_ptr<Node3d> end_node = std::shared_ptr<Node3d>(new Node3d(
       reeds_shepp_to_end->x, reeds_shepp_to_end->y, reeds_shepp_to_end->phi,
       XYbounds_, planner_open_space_config_));
+  // 设置RS路径终点节点的父节点为当前节点
   end_node->SetPre(current_node);
+  // 设置RS路径终点节点的轨迹成本为当前节点轨迹成本加上RS路径的代价
   end_node->SetTrajCost(current_node->GetTrajCost() + reeds_shepp_to_end->cost);
   return end_node;
 }
@@ -778,7 +789,7 @@ bool HybridAStar::Plan(
   print_curves.AddPoint("vehicle_end_box", ebox.GetAllCorners());
   
   XYbounds_ = XYbounds;
-// load nodes and obstacles
+  // load nodes and obstacles
   start_node_.reset(
       new Node3d({sx}, {sy}, {sphi}, XYbounds_, planner_open_space_config_));
   end_node_.reset(
@@ -842,6 +853,7 @@ bool HybridAStar::Plan(
 
     const double rs_start_time = Clock::NowInSeconds();
     std::shared_ptr<Node3d> final_node = nullptr;
+    // 使用RS路径扩展方式得到候选终点节点
     if (AnalyticExpansion(current_node, &final_node)) {
       if (final_node_ == nullptr ||
           final_node_->GetTrajCost() > final_node->GetTrajCost()) {
