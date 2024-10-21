@@ -157,7 +157,7 @@ bool ReedShepp::ShortestRSP(
     }
   }
 
-  // 生成局部路径点
+  // 对最优RS曲线路径，根据路径特征计算填充RS路径点x,y,phi,gear
   if (!GenerateLocalConfigurations(start_node, end_node,
                                    &(all_possible_paths
                                    [optimal_path_index]))) {
@@ -172,7 +172,7 @@ bool ReedShepp::ShortestRSP(
   // ssm << "--rspath\n";
   // AERROR << ssm.str();
 
-  // 路径重点误差校验
+  // 离散点终点位姿误差校验，若误差大于1e-3，则输出路径点信息
   if (std::abs(all_possible_paths[optimal_path_index].x.back() -
                end_node->GetX()) > 1e-3 ||
       std::abs(all_possible_paths[optimal_path_index].y.back() -
@@ -1100,6 +1100,8 @@ bool ReedShepp::GenerateLocalConfigurations(
   double step_scaled =
       planner_open_space_config_.warm_start_config().step_size() * max_kappa_;
   ADEBUG << "shortest_path->total_length" << shortest_path->total_length;
+
+  // 预计算路径点数
   size_t point_num = static_cast<size_t>(
       std::floor(shortest_path->total_length / step_scaled * radius +
                  static_cast<double>(shortest_path->segs_lengths.size()) + 4));
@@ -1121,6 +1123,8 @@ bool ReedShepp::GenerateLocalConfigurations(
     d = -step_scaled;
   }
   pd = d;
+
+  // 将RS路径转换为路径点 x,y,phi,gear
   for (size_t i = 0; i < shortest_path->segs_types.size(); ++i) {
     char m = shortest_path->segs_types.at(i);
     double l = shortest_path->segs_lengths.at(i);
@@ -1147,6 +1151,8 @@ bool ReedShepp::GenerateLocalConfigurations(
     index++;
     Interpolation(index, l, m, ox, oy, ophi, radius, &px, &py, &pphi, &pgear);
   }
+
+  // 去除末尾的无效路径点
   double epsilon = 1e-15;
   while (std::fabs(px.back()) < epsilon && std::fabs(py.back()) < epsilon &&
          std::fabs(pphi.back()) < epsilon && pgear.back()) {
@@ -1155,6 +1161,8 @@ bool ReedShepp::GenerateLocalConfigurations(
     pphi.pop_back();
     pgear.pop_back();
   }
+
+  // 将起点局部坐标系下的路径转换为全局坐标系下的路径
   for (size_t i = 0; i < px.size(); ++i) {
     shortest_path->x.push_back(std::cos(-start_node->GetPhi()) * px.at(i) +
                                std::sin(-start_node->GetPhi()) * py.at(i) +
@@ -1166,10 +1174,14 @@ bool ReedShepp::GenerateLocalConfigurations(
         common::math::NormalizeAngle(pphi.at(i) + start_node->GetPhi()));
   }
   shortest_path->gear = pgear;
+
+  // RS曲线路径分段长度考虑曲率转换
   for (size_t i = 0; i < shortest_path->segs_lengths.size(); ++i) {
     shortest_path->segs_lengths.at(i) =
         shortest_path->segs_lengths.at(i) / max_kappa_;
   }
+
+  // 总长度考虑曲率转换
   shortest_path->total_length = shortest_path->total_length / max_kappa_;
   return true;
 }

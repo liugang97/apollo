@@ -108,6 +108,7 @@ HybridAStar::HybridAStar(const PlannerOpenSpaceConfig& open_space_conf) {
 bool HybridAStar::AnalyticExpansion(
     std::shared_ptr<Node3d> current_node,
     std::shared_ptr<Node3d>* candidate_final_node) {
+      
   std::shared_ptr<ReedSheppPath> reeds_shepp_to_check =
       std::make_shared<ReedSheppPath>();
   
