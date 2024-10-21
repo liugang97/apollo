@@ -62,6 +62,7 @@ Node3d::Node3d(double x, double y, double phi,
   index_ = ComputeStringIndex(x_grid_, y_grid_, phi_grid_);
 }
 
+// 构造函数，用于从已遍历的点集构造节点
 Node3d::Node3d(const std::vector<double>& traversed_x,
                const std::vector<double>& traversed_y,
                const std::vector<double>& traversed_phi,
@@ -72,11 +73,13 @@ Node3d::Node3d(const std::vector<double>& traversed_x,
   CHECK_EQ(traversed_x.size(), traversed_y.size());
   CHECK_EQ(traversed_x.size(), traversed_phi.size());
 
+  // 最后一个点作为当前节点
   x_ = traversed_x.back();
   y_ = traversed_y.back();
   phi_ = traversed_phi.back();
 
   // XYbounds in xmin, xmax, ymin, ymax
+  // 计算当前节点在栅格地图中的位置
   x_grid_ = static_cast<int>(
       (x_ - XYbounds[0]) /
       open_space_conf.warm_start_config().xy_grid_resolution());
@@ -87,11 +90,14 @@ Node3d::Node3d(const std::vector<double>& traversed_x,
       (phi_ - (-M_PI)) /
       open_space_conf.warm_start_config().phi_grid_resolution());
 
+  // 将已遍历的点集复制到当前节点
   traversed_x_ = traversed_x;
   traversed_y_ = traversed_y;
   traversed_phi_ = traversed_phi;
 
+  // 计算当前节点的索引
   index_ = ComputeStringIndex(x_grid_, y_grid_, phi_grid_);
+  // 计算当前节点已经过的步长
   step_size_ = traversed_x.size();
 }
 

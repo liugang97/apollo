@@ -130,15 +130,15 @@ class Node3d {
   double x_ = 0.0;
   double y_ = 0.0;
   double phi_ = 0.0;
-  size_t step_size_ = 1;
+  size_t step_size_ = 1;    // 当前节点经过的步长
   std::vector<double> traversed_x_;
   std::vector<double> traversed_y_;
   std::vector<double> traversed_phi_;
-  int x_grid_ = 0;
-  int y_grid_ = 0;
-  int phi_grid_ = 0;
-  std::string index_;
-  double traj_cost_ = 0.0;
+  int x_grid_ = 0;    // 当前节点在栅格地图中的x坐标
+  int y_grid_ = 0;    // 当前节点在栅格地图中的y坐标
+  int phi_grid_ = 0;    // 当前节点在栅格地图中的phi坐标
+  std::string index_;    // 当前节点的索引
+  double traj_cost_ = 0.0;    // 当前节点的轨迹成本
   double heuristic_cost_ = 0.0;
   double cost_ = 0.0;
   std::shared_ptr<Node3d> pre_node_ = nullptr;
