@@ -50,10 +50,20 @@ HybridAStar::HybridAStar(const PlannerOpenSpaceConfig& open_space_conf) {
   step_size_ = planner_open_space_config_.warm_start_config().step_size();
   xy_grid_resolution_ =
       planner_open_space_config_.warm_start_config().xy_grid_resolution();
+
+  /*
+  弧长 = 角度 * 半径
+  tan(转向角) = 轴距 / 半径
+
+  推得： 弧长 = 角度 * 轴距 / tan(转向角)
+   */
+  // 栅格角度分辨率和转弯半径确定 arc_length_
   arc_length_ =
       planner_open_space_config_.warm_start_config().phi_grid_resolution() *
       vehicle_param_.wheel_base() /
       std::tan(max_steer_angle_ * 2 / (next_node_num_ / 2 - 1));
+
+  // arc_length_长度至少为栅格的斜线长度
   if (arc_length_ < std::sqrt(2) * xy_grid_resolution_) {
     arc_length_ = std::sqrt(2) * xy_grid_resolution_;
   }
@@ -204,13 +214,17 @@ std::shared_ptr<Node3d> HybridAStar::Next_node_generator(
     std::shared_ptr<Node3d> current_node, size_t next_node_index) {
   double steering = 0.0;
   double traveled_distance = 0.0;
+
+  // 前进时，根据拓展节点的index计算转向角、前进距离
   if (next_node_index < static_cast<double>(next_node_num_) / 2) {
     steering = -max_steer_angle_ +
                (2 * max_steer_angle_ /
                (static_cast<double>(next_node_num_) / 2 - 1))
                * static_cast<double>(next_node_index);
     traveled_distance = step_size_;
-  } else {
+  }
+  // 后退时
+  else {
     size_t index = next_node_index - next_node_num_ / 2;
     steering = -max_steer_angle_
             + (2 * max_steer_angle_
@@ -223,12 +237,17 @@ std::shared_ptr<Node3d> HybridAStar::Next_node_generator(
   std::vector<double> intermediate_x;
   std::vector<double> intermediate_y;
   std::vector<double> intermediate_phi;
+
+  // 获取当前节点的位姿
   double last_x = current_node->GetX();
   double last_y = current_node->GetY();
   double last_phi = current_node->GetPhi();
+
   intermediate_x.push_back(last_x);
   intermediate_y.push_back(last_y);
   intermediate_phi.push_back(last_phi);
+
+  // 计算 arc_length_ 长度下的经过的点位姿
   for (size_t i = 0; i < arc_length_ / step_size_; ++i) {
     const double next_phi = last_phi +
                             traveled_distance /
@@ -247,13 +266,16 @@ std::shared_ptr<Node3d> HybridAStar::Next_node_generator(
     last_y = next_y;
     last_phi = next_phi;
   }
-  // check if the vehicle runs outside of XY boundary
+
+  // 若拓展的节点超过边界，拓展失败，返回 nullptr
   if (intermediate_x.back() > XYbounds_[1] ||
       intermediate_x.back() < XYbounds_[0] ||
       intermediate_y.back() > XYbounds_[3] ||
       intermediate_y.back() < XYbounds_[2]) {
     return nullptr;
   }
+
+  // 创建拓展节点 Node3d，设置父节点、行驶方向、转向角
   std::shared_ptr<Node3d> next_node = std::shared_ptr<Node3d>(
       new Node3d(intermediate_x, intermediate_y, intermediate_phi, XYbounds_,
                  planner_open_space_config_));
@@ -265,9 +287,11 @@ std::shared_ptr<Node3d> HybridAStar::Next_node_generator(
 
 void HybridAStar::CalculateNodeCost(
     std::shared_ptr<Node3d> current_node, std::shared_ptr<Node3d> next_node) {
+  // 子节点轨迹成本 = 当前节点轨迹成本 + 子节点轨迹成本
   next_node->SetTrajCost(
       current_node->GetTrajCost() + TrajCost(current_node, next_node));
-  // evaluate heuristic cost
+
+  // 计算启发代价，即为 dp_map_ 中的代价
   double optimal_path_cost = 0.0;
   optimal_path_cost += HoloObstacleHeuristic(next_node);
   next_node->SetHeuCost(optimal_path_cost);
@@ -277,33 +301,43 @@ double HybridAStar::TrajCost(std::shared_ptr<Node3d> current_node,
                              std::shared_ptr<Node3d> next_node) {
     // evaluate cost on the trajectory and add current cost
   double piecewise_cost = 0.0;
+
+  // 若子节点行驶方向为前进，则增加前进成本
   if (next_node->GetDirec()) {
     piecewise_cost +=
       static_cast<double>(next_node->GetStepSize() - 1) *
       step_size_ *
       traj_forward_penalty_;
-  } else {
+  }
+  // 若子节点行驶方向为后退，则增加后退成本
+  else {
     piecewise_cost +=
       static_cast<double>(next_node->GetStepSize() - 1) *
       step_size_ *
       traj_back_penalty_;
   }
   AINFO << "traj cost: " << piecewise_cost;
+
+  // 若当前节点与子节点行驶方向不同，则增加方向切换成本
   if (current_node->GetDirec() != next_node->GetDirec()) {
     piecewise_cost += traj_gear_switch_penalty_;
   }
+  // 增加转向角成本
   piecewise_cost += traj_steer_penalty_ * std::abs(next_node->GetSteer());
+  // 增加转向角变化成本
   piecewise_cost += traj_steer_change_penalty_ *
                     std::abs(next_node->GetSteer() - current_node->GetSteer());
   return piecewise_cost;
 }
 
 double HybridAStar::HoloObstacleHeuristic(std::shared_ptr<Node3d> next_node) {
+  // 根据子节点坐标计算在dp_map_中的成本
   return grid_a_star_heuristic_generator_->CheckDpMap(
       next_node->GetX(), next_node->GetY());
 }
 
 bool HybridAStar::GetResult(HybridAStartResult* result) {
+  // 获取最终节点
   std::shared_ptr<Node3d> current_node = final_node_;
   std::vector<double> hybrid_a_x;
   std::vector<double> hybrid_a_y;
@@ -314,35 +348,54 @@ bool HybridAStar::GetResult(HybridAStartResult* result) {
         << ", " << current_node->GetYs().front();
   AINFO << "cost: " << final_node_->GetCost()
         << "," << final_node_->GetTrajCost();
+
+  // 从最终节点回溯到起点
   while (current_node->GetPreNode() != nullptr) {
     std::vector<double> x = current_node->GetXs();
     std::vector<double> y = current_node->GetYs();
     std::vector<double> phi = current_node->GetPhis();
+
+    // 校验节点经过轨迹点数组是否为空
     if (x.empty() || y.empty() || phi.empty()) {
         AERROR << "result size check failed";
         return false;
     }
+    // 校验节点轨迹点数组是否相等
     if (x.size() != y.size() || x.size() != phi.size()) {
         AERROR << "states sizes are not equal";
         return false;
     }
+
+    // 反转轨迹点数组，即从终点到起点顺序的轨迹点
     std::reverse(x.begin(), x.end());
     std::reverse(y.begin(), y.end());
     std::reverse(phi.begin(), phi.end());
+
+    // 删除最后一个轨迹点
     x.pop_back();
     y.pop_back();
     phi.pop_back();
+
+    // 将轨迹点数组插入到 hybrid_a_x, hybrid_a_y, hybrid_a_phi 中
     hybrid_a_x.insert(hybrid_a_x.end(), x.begin(), x.end());
     hybrid_a_y.insert(hybrid_a_y.end(), y.begin(), y.end());
     hybrid_a_phi.insert(hybrid_a_phi.end(), phi.begin(), phi.end());
+
+    // 更新当前节点为父节点
     current_node = current_node->GetPreNode();
   }
+
+  // 最后放入起点轨迹点
   hybrid_a_x.push_back(current_node->GetX());
   hybrid_a_y.push_back(current_node->GetY());
   hybrid_a_phi.push_back(current_node->GetPhi());
+
+  // 将终点到起点的轨迹点反转，为从起点到终点顺序
   std::reverse(hybrid_a_x.begin(), hybrid_a_x.end());
   std::reverse(hybrid_a_y.begin(), hybrid_a_y.end());
   std::reverse(hybrid_a_phi.begin(), hybrid_a_phi.end());
+
+  // 将轨迹点数组结果赋值给 result
   (*result).x = hybrid_a_x;
   (*result).y = hybrid_a_y;
   (*result).phi = hybrid_a_phi;
@@ -383,8 +436,10 @@ bool HybridAStar::GenerateSpeedAcceleration(
   }
   const size_t x_size = result->x.size();
 
-  // load velocity from position
-  // initial and end speed are set to be zeros
+  // 速度计算
+  // 1. 初始点和终点速度为0
+  // 2. 中间点速度
+  // x和y方向分别分别计算三点间距比时间间隔在中间点phi上的分量均值之和
   result->v.push_back(0.0);
   for (size_t i = 1; i + 1 < x_size; ++i) {
     double discrete_v = (((result->x[i + 1] - result->x[i]) / delta_t_) *
@@ -401,13 +456,13 @@ bool HybridAStar::GenerateSpeedAcceleration(
   }
   result->v.push_back(0.0);
 
-  // load acceleration from velocity
+  // 速度间隔比上时间计算得到加速度
   for (size_t i = 0; i + 1 < x_size; ++i) {
     const double discrete_a = (result->v[i + 1] - result->v[i]) / delta_t_;
     result->a.push_back(discrete_a);
   }
 
-  // load steering from phi
+  // 根据离散heading计算前轮转角
   for (size_t i = 0; i + 1 < x_size; ++i) {
     double discrete_steer = (result->phi[i + 1] - result->phi[i]) *
                             vehicle_param_.wheel_base() / step_size_;
@@ -425,6 +480,8 @@ bool HybridAStar::GenerateSCurveSpeedAcceleration(HybridAStartResult* result) {
   AINFO << "GenerateSCurveSpeedAcceleration";
   // sanity check
   CHECK_NOTNULL(result);
+
+  // 输入轨迹点校验
   if (result->x.size() < 2 || result->y.size() < 2 || result->phi.size() < 2) {
     AERROR << "result size check when generating speed and acceleration fail";
     return false;
@@ -435,21 +492,25 @@ bool HybridAStar::GenerateSCurveSpeedAcceleration(HybridAStartResult* result) {
     return false;
   }
 
-  // get gear info
+  // 初始车辆heading
   double init_heading = result->phi.front();
+  // 初始路径向量
   const Vec2d init_tracking_vector(result->x[1] - result->x[0],
                                    result->y[1] - result->y[0]);
+  // 初始档位
   const double gear =
       std::abs(common::math::NormalizeAngle(
           init_heading - init_tracking_vector.Angle())) < M_PI_2;
 
-  // get path lengh
+  // 获取轨迹点个数
   size_t path_points_size = result->x.size();
 
   double accumulated_s = 0.0;
   result->accumulated_s.clear();
   auto last_x = result->x.front();
   auto last_y = result->y.front();
+
+  // 欧式距离累加计算S
   for (size_t i = 0; i < path_points_size; ++i) {
     double x_diff = result->x[i] - last_x;
     double y_diff = result->y[i] - last_y;
@@ -468,7 +529,9 @@ bool HybridAStar::GenerateSCurveSpeedAcceleration(HybridAStartResult* result) {
   SpeedData speed_data;
 
   // TODO(Jinyun): explore better time horizon heuristic
+  // 获取轨迹长度
   const double path_length = result->accumulated_s.back();
+  // 估算总时间，最低为10s
   const double total_t =
       std::max(gear ? 1.5 *
                           (max_forward_v_ * max_forward_v_ +
@@ -633,13 +696,21 @@ bool HybridAStar::TrajectoryPartition(
   partitioned_result->clear();
   partitioned_result->emplace_back();
   auto* current_traj = &(partitioned_result->back());
+
+  // 初始车辆heading角
   double heading_angle = phi.front();
+
+  // 初始路径向量
   const Vec2d init_tracking_vector(x[1] - x[0], y[1] - y[0]);
+  // 初始路径向量角
   double tracking_angle = init_tracking_vector.Angle();
+  // 初始档位，由路径向量角与车辆heading角度差判断
   bool current_gear =
       std::abs(common::math::NormalizeAngle(tracking_angle - heading_angle))
       <
       (M_PI_2);
+
+  // 遍历轨迹点，找到换挡点，对轨迹点进行分段
   for (size_t i = 0; i < horizon - 1; ++i) {
     heading_angle = phi[i];
     const Vec2d tracking_vector(x[i + 1] - x[i], y[i + 1] - y[i]);
@@ -647,12 +718,16 @@ bool HybridAStar::TrajectoryPartition(
     bool gear =
         std::abs(common::math::NormalizeAngle(tracking_angle - heading_angle)) <
         (M_PI_2);
+    // i 点处档位与当前档位不同时
     if (gear != current_gear) {
       current_traj->x.push_back(x[i]);
       current_traj->y.push_back(y[i]);
       current_traj->phi.push_back(phi[i]);
+
+      // 新增轨迹段
       partitioned_result->emplace_back();
       current_traj = &(partitioned_result->back());
+      // 更新档位
       current_gear = gear;
     }
     current_traj->x.push_back(x[i]);
@@ -667,6 +742,7 @@ bool HybridAStar::TrajectoryPartition(
 
   // Retrieve v, a and steer from path
   for (auto& result : *partitioned_result) {
+    // s-curve (piecewise_jerk) 平滑速度、加速度标志位
     if (FLAGS_use_s_curve_speed_smooth) {
       if (!GenerateSCurveSpeedAcceleration(&result)) {
         AERROR << "GenerateSCurveSpeedAcceleration fail";
@@ -854,7 +930,8 @@ bool HybridAStar::Plan(
 
     const double rs_start_time = Clock::NowInSeconds();
     std::shared_ptr<Node3d> final_node = nullptr;
-    // 使用RS路径扩展方式得到候选终点节点
+
+    // 尝试使用RS路径扩展方式得到候选终点节点
     if (AnalyticExpansion(current_node, &final_node)) {
       if (final_node_ == nullptr ||
           final_node_->GetTrajCost() > final_node->GetTrajCost()) {
@@ -877,39 +954,53 @@ bool HybridAStar::Plan(
     }
 
     size_t begin_index = 0;
+    // 拓展子节点数量
     size_t end_index = next_node_num_;
     std::unordered_set<std::string> temp_set;
+
+    // 拓展子节点
     for (size_t i = begin_index; i < end_index; ++i) {
       const double gen_node_time = Clock::NowInSeconds();
+      // 生成子节点
       std::shared_ptr<Node3d> next_node = Next_node_generator(current_node, i);
       node_generator_time += Clock::NowInSeconds() - gen_node_time;
 
-      // boundary check failure handle
+      // 检查若子节点拓展失败，则跳过
       if (next_node == nullptr) {
         continue;
       }
-      // check if the node is already in the close set
+
+      // 检查若子节点在 close_set_ 中，则跳过
       if (close_set_.count(next_node->GetIndex()) > 0) {
         continue;
       }
-      // collision check
+
       const double validity_check_start_time = Clock::NowInSeconds();
+      // 子节点可行性检查
       if (!ValidityCheck(next_node)) {
         continue;
       }
       validity_check_time += Clock::NowInSeconds() - validity_check_start_time;
+
+      // 若子节点不在 open_set_ 中，则将其加入 open_pq_
       if (open_set_.count(next_node->GetIndex()) == 0) {
         const double start_time = Clock::NowInSeconds();
+
+        // 计算节点代价
         CalculateNodeCost(current_node, next_node);
         const double end_time = Clock::NowInSeconds();
         heuristic_time += end_time - start_time;
+
         temp_set.insert(next_node->GetIndex());
         open_pq_.emplace(next_node, next_node->GetCost());
       }
     }
+
+    // 将所有不在 open_set_ 中的子节点加入 open_set_
     open_set_.insert(temp_set.begin(), temp_set.end());
   }
 
+  // 若搜索完成未找到可行路径
   if (final_node_ == nullptr) {
     AERROR << "Hybird A* cannot find a valid path";
     print_curves.PrintToLog();
@@ -934,6 +1025,7 @@ bool HybridAStar::Plan(
 
   print_curves.AddPoint(
       "rs_point", final_node_->GetXs().front(), final_node_->GetYs().front());
+
   if (!GetResult(result)) {
     AERROR << "GetResult failed";
     print_curves.PrintToLog();

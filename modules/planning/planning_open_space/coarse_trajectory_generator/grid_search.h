@@ -158,6 +158,7 @@ class GridSearch {
           return left.second >= right.second;
       }
   };
+  // 基于终点的所有节点的 index-cost 无序图
   std::unordered_map<std::string, std::shared_ptr<Node2d>> dp_map_;
 
   // park generic

@@ -178,6 +178,7 @@ bool GridSearch::GenerateDpMap(
             obstacles_linesegments_vec,
         const std::vector<std::vector<common::math::LineSegment2d>>&
             soft_boundary_linesegments_vec) {
+  
   // 依据 cost  升序排序的 Node2d 的 index
   std::priority_queue<std::pair<std::string, double>,
                       std::vector<std::pair<std::string, double>>, cmp>
@@ -245,10 +246,16 @@ bool GridSearch::GenerateDpMap(
 }
 
 double GridSearch::CheckDpMap(const double sx, const double sy) {
+  
+  // 根据坐标计算 index
   std::string index = Node2d::CalcIndex(sx, sy, xy_grid_resolution_, XYbounds_);
+  
+  // 若 dp_map_ 中存在该点，则返回成本
   if (dp_map_.find(index) != dp_map_.end()) {
     return dp_map_[index]->GetCost() * xy_grid_resolution_;
-  } else {
+  } 
+  // 否则返回无穷大
+  else {
     return std::numeric_limits<double>::infinity();
   }
 }
